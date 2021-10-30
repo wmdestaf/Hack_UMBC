@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import *
 from tkinter import ttk
 import copy
+import math
     
 class Cell:
     def __init__(self, color,canv,x,y):
@@ -10,7 +11,7 @@ class Cell:
         self.x=x
         self.y=y
         self.color = 0
-        self.possible_colors = ['white','red','green','blue']
+        self.possible_colors = ['white','red','pink','blue']
         self.gid = None
     
     def chg_gcol(self,off):
@@ -33,7 +34,7 @@ def on_cell_click(x,y,r_id,off): #this is horrific garbage use of a 'factory' bu
     return internal
    
 def generate_grid():
-    global canv, grid, total_sz, onscreen
+    global canv, grid, total_sz, onscreen, mode
     
     #Clear any bindings that previously existed
     for x in range(total_sz[0]):
@@ -53,6 +54,39 @@ def generate_grid():
             canv.tag_bind(r_id, "<Button-1>", on_cell_click(x,y,r_id,1))
             canv.tag_bind(r_id, "<Button-3>", on_cell_click(x,y,r_id,-1))
             grid[x][y].gid = r_id
+            
+    mode = "ORTHOGONAL"
+    
+def generate_grid_i():
+    global canv, grid, total_sz, onscreen, mode
+    
+    #Clear any bindings that previously existed
+    for x in range(total_sz[0]):
+        for y in range(total_sz[1]):
+            canv.delete(grid[x][y].gid)
+    
+    cwidth = canv.winfo_width()
+    cheight = canv.winfo_height()
+    
+    dx = cwidth/onscreen[0] * math.sqrt(2) #!
+    dy = cheight/onscreen[1]
+    
+    for x in range(total_sz[0]):
+        for y in range(total_sz[1]):  
+            x1 = (dx*x*0.5) + (0.0*dx) + (0.5*y*dx)
+            y1 = (dy*0.5*y) + (0.5*dy) - (0.5*x*dy)
+            x2 = x1 + 0.5*dx
+            y2 = y1 - 0.5*dy
+            x3 = x1 + 1.0*dx
+            y3 = y1
+            x4 = x2
+            y4 = y1 + 0.5*dy
+            r_id = canv.create_polygon([x1,y1,x2,y2,x3,y3,x4,y4], fill = grid[x][y].get_gcol(),outline='black') 
+            canv.tag_bind(r_id, "<Button-1>", on_cell_click(x,y,r_id,1))
+            canv.tag_bind(r_id, "<Button-3>", on_cell_click(x,y,r_id,-1))
+            grid[x][y].gid = r_id
+    
+    mode = "ISOMETRIC"
     
 def game_loop():
     global canv, grid, keydowns
@@ -77,18 +111,22 @@ def keyup(e):
     
     
 def keydown(e):
+    global canv
+    
     #print('down', e.keysym_num)
     k = e.keysym_num
     if k >= 65361 and k <= 65364: 
         keydowns[k-65361] = 1
     elif k == 99: #center
         center_screen()
+        canv.update()
+        
 
 def donothing():
     pass
     
 def center_screen():
-    global canv, grid, onscreen, total_sz
+    global canv, grid, onscreen, total_sz, mode
     
     cwidth = canv.winfo_width()
     cheight = canv.winfo_height()
@@ -100,17 +138,27 @@ def center_screen():
     oldxs = canv["xscrollincrement"]
     oldys = canv["yscrollincrement"]
     
-    canv["xscrollincrement"] = 0.5 * (total_sz[0] - onscreen[0]) * (cwidth  / onscreen[0])
-    canv["yscrollincrement"] = 0.5 * (total_sz[1] - onscreen[1]) * (cheight / onscreen[1])
-    canv.xview_scroll(1, UNITS)
-    canv.yview_scroll(1, UNITS)
+    dy = cheight/onscreen[1]
+    
+    if mode == "ORTHOGONAL":
+        dx = cwidth/onscreen[0]
+        canv["xscrollincrement"] = 0.5 * (total_sz[0] - onscreen[0]) * dx
+        canv["yscrollincrement"] = 0.5 * (total_sz[1] - onscreen[1]) * dy
+        canv.xview_scroll(1, UNITS)
+        canv.yview_scroll(1, UNITS)
+    else: #utter ridiculousness
+        dx = cwidth/onscreen[0] * math.sqrt(2) #!
+        canv["yscrollincrement"] = (cheight / 2) - (dy/2)
+        canv.yview_scroll(-1, UNITS)
+        canv["xscrollincrement"] = 0.5 * (total_sz[0] - (onscreen[0]/math.sqrt(2))) * dx
+        canv.xview_scroll(1, UNITS)
+        
     
     canv["xscrollincrement"] = oldxs
     canv["yscrollincrement"] = oldys
-    
     canv.update()
     
-def new(ignore):
+def new():
     global grid, onscreen, base_onscreen, total_sz, base_scrollspeed
     #Make logical board
     onscreen = [6,6]
@@ -126,16 +174,17 @@ def new(ignore):
     canv["yscrollincrement"] = 2*onscreen[1]
     #move the camera to the center of the canvas
     center_screen()
+    canv.update()
     
 def zoom(n):
-    global canv, total_sz, onscreen, base_onscreen
+    global canv, total_sz, onscreen, base_onscreen, mode
     if not n:
         onscreen = copy.deepcopy(base_onscreen)
     elif min(onscreen[0]+n,onscreen[1]+n) < 2 or max(onscreen[0]+n,onscreen[1]+n) > min(total_sz[0],total_sz[1]):
-        return #Don't zoom out too far.
+        return #Zoom too close, divide by zero. Zoom too far, centering becomes annoying to calculate for.
     onscreen[0] += n
     onscreen[1] += n
-    generate_grid() #Costly but necessary to rebind click->action areas within TK. 
+    generate_grid() if mode == "ORTHOGONAL" else generate_grid_i()  #Costly but necessary to rebind click->action areas within TK. 
     canv.update()
         
     
@@ -156,7 +205,7 @@ if __name__ == "__main__":
     menubar = Menu(root)
     filemenu = Menu(menubar, tearoff=0)
     filemenu.add_command(label="New", command=new, accelerator="Ctrl-N")
-    root.bind_all("<Control-n>", lambda k: new())
+    root.bind_all("<Control-n>", lambda k: new()) #needed, as otherwise tries to pass new a param if just given raw FP
     filemenu.add_command(label="Open", command=donothing,accelerator="Ctrl-O")
     filemenu.add_command(label="Save", command=donothing,accelerator="Ctrl-S")
     filemenu.add_separator()
@@ -166,17 +215,22 @@ if __name__ == "__main__":
     viewmenu = Menu(menubar, tearoff=0)
     viewmenu.add_command(label="Center",     command=center_screen,    accelerator="(C)"   )
     viewmenu.add_command(label="Zoom In",    command=lambda: zoom(-1), accelerator="Ctrl +")
-    root.bind_all("<Control-plus>", lambda k: zoom(-1))
+    root.bind_all("<Control-plus>",  lambda k: zoom(-1))
+    root.bind_all("<Control-equal>", lambda k: zoom(-1)) #!!!
     viewmenu.add_command(label="Zoom Out",   command=lambda: zoom(1),  accelerator="Ctrl -")
-    root.bind_all("<Control-minus>",lambda k: zoom(1))
+    root.bind_all("<Control-minus>", lambda k: zoom(1))
     viewmenu.add_command(label="Reset Zoom", command=lambda: zoom(0),  accelerator="Ctrl+0")
-    root.bind_all("<Control-0>",    lambda k: zoom(0))
-    
+    root.bind_all("<Control-0>",     lambda k: zoom(0))
+    viewmenu.add_separator()
+    viewmenu.add_command(label="Orthogonal", command=generate_grid,   accelerator="Ctrl+Alt+Shift+O")
+    root.bind_all("<Control-Alt-Shift-O>", lambda k: generate_grid())
+    viewmenu.add_command(label="Isometric",  command=generate_grid_i, accelerator="Ctrl+Alt+Shift+I")
+    root.bind_all("<Control-Alt-Shift-I>", lambda k: generate_grid_i())
     menubar.add_cascade(label="View", menu=viewmenu)
 
     root.config(menu=menubar)
     
-    new('') #make fresh board
+    new() #make fresh board
     keydowns = [False for i in range(4)] #LEFT UP RIGHT DOWN
     
     game_loop()
