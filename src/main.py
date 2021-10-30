@@ -209,16 +209,16 @@ def load_file():
         messagebox.showinfo('Error', 'Could not open ' + filename)
         return
     
-    #try:
-    with f:
-        _total_sz = list(map(int,f.readline().strip().split(",")))
-        _onscreen = list(map(int,f.readline().strip().split(",")))
-        _grid     = [[Cell(0,canv,x,y) for x in range(_total_sz[0])] for y in range(_total_sz[1])]
-        for y in range(_total_sz[1]): #used up all my brainpower and forgot how to do this as a list comp
-            line_serial = f.readline().strip().split(",")
-            for x, elem in enumerate(line_serial):
-                _grid[x][y].deserialize(elem)
-    except Exception as e:
+    try:
+        with f:
+            _total_sz = list(map(int,f.readline().strip().split(",")))
+            _onscreen = list(map(int,f.readline().strip().split(",")))
+            _grid     = [[Cell(0,canv,x,y) for x in range(_total_sz[0])] for y in range(_total_sz[1])]
+            for y in range(_total_sz[1]): #used up all my brainpower and forgot how to do this as a list comp
+                line_serial = f.readline().strip().split(",")
+                for x, elem in enumerate(line_serial):
+                    _grid[x][y].deserialize(elem)
+    except Exception:
         messagebox.showinfo('Error', 'The file is unsupported or corrupt.')
         return
         
