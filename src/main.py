@@ -222,6 +222,8 @@ def load_file():
         messagebox.showinfo('Error', 'The file is unsupported or corrupt.')
         return
         
+    clean_grid()
+        
     total_sz = _total_sz
     onscreen = _onscreen
     base_onscreen = copy.deepcopy(onscreen)
@@ -231,7 +233,6 @@ def load_file():
     curfile = filename
     root.title("RPG: " + curfile)
     
-    clean_grid()
     generate_grid(mode)
     center_screen()
     canv.update()
@@ -274,6 +275,13 @@ def attempt_write(filename):
     except EnvironmentError:
         return False
     return True
+    
+def disp_cell_size_debug():
+    cwidth = canv.winfo_width()
+    cheight = canv.winfo_height()
+    dx = (cwidth/onscreen[0] * math.sqrt(2)) if mode == "ISOMETRIC" else (cwidth/onscreen[0]) 
+    dy = cheight/onscreen[1]
+    messagebox.showinfo('Info', str(round(dx,5)) + "," + str(round(dy,5)))
     
 if __name__ == "__main__":
     s_width,s_height = 500,500
@@ -318,6 +326,10 @@ if __name__ == "__main__":
     viewmenu.add_command(label="Isometric",  command=lambda: generate_grid("ISOMETRIC"), accelerator="Ctrl+Shift+I")
     root.bind_all("<Control-Shift-I>", lambda k: generate_grid("ISOMETRIC"))
     menubar.add_cascade(label="View", menu=viewmenu)
+    
+    debugmenu = Menu(menubar, tearoff=0)
+    debugmenu.add_command(label="Cell Size", command=disp_cell_size_debug)
+    menubar.add_cascade(label="Debug", menu=debugmenu)
 
     root.config(menu=menubar)
     
