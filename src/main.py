@@ -5,6 +5,8 @@ from tkinter import ttk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 from os.path import exists
+import json
+import base64
 import copy
 import math
 import collections
@@ -15,6 +17,7 @@ class Cell:
         self.img_src_quality = None
         self.img = None
         self.img_id = -1
+        self.img_selector_match_id = -1
         self.x=x #gridx, gridy
         self.y=y
         self.color = color
@@ -40,11 +43,13 @@ class Cell:
             self.img = None
             self.img_src_quality = None
             self.img_id = -1
+            self.img_selector_match_id = -1
         else: #creation event
             if self.img: #remove any image which is already there
                 canv.delete(self.img_id)
-            self.img = active_tile
-            self.img_src_quality = active_tile
+            self.img = active_tile[0]
+            self.img_src_quality = active_tile[0]
+            self.img_selector_match_id = active_tile[1]
             self.fireImageScaleEvent()
         canv.update()
             
@@ -53,15 +58,14 @@ class Cell:
         
         if not self.img:
             return
-          
+        
         canv.delete(self.img_id)
           
         dx, dy = disp_cell_size_debug(False)
         pil_img = ImageTk.getimage(self.img_src_quality)
         self.img = ImageTk.PhotoImage(pil_img.resize((int(dx),int(dy)), Image.ANTIALIAS))
         
-        #this can be one function
-        #TODO: does not account for images at x:y != 2:1
+        #TODO: DOES NOT ACCOUNT FOR IMAGES AT RESOLUTION x:y != 2:1
         onscreen_cell = canv.coords(self.gid)
         draw_x = onscreen_cell[2] #leftest point of the trapezoid
         draw_y = onscreen_cell[5] #highest point of the trapezoid
@@ -76,20 +80,18 @@ class Cell:
                 if grid[x][y].img and (x > self.x or (x == self.x and y < self.y)):
                     canv.tag_lower(self.img_id, grid[x][y].img_id)
     
-    def chg_gcol(self,off):
+    def chg_gcol(self,off): #very legacy
         self.color += off
         self.color %= len(self.possible_colors)
     
-    def get_gcol(self):
+    def get_gcol(self): #somewhat legacy
         return self.possible_colors[self.color]
     
     def seralize(self):
-        #This will become much more complicated.
-        return str(self.color)
+        return str(self.img_selector_match_id)
         
     def deserialize(self,x):
-        #ditto
-        self.color = int(x)
+        self.img_selector_match_id = int(x)
         
     
     def __repr__(self):
@@ -123,7 +125,7 @@ def generate_grid(which_mode):
 
     dy = cheight/onscreen[1]
     
-    if which_mode == "ORTHOGONAL":
+    if which_mode == "ORTHOGONAL": #TODO: This doesn't come close to working anymore.
         dx = cwidth/onscreen[0]
         for x in range(total_sz[0]):
             for y in range(total_sz[1]):
@@ -234,8 +236,10 @@ def new():
     onscreen = [6,6]
     base_onscreen = onscreen
     total_sz = [10,10]
-    grid = [[Cell(canv,x,y,color=(x+y)%2) for x in range(total_sz[0])] for y in range(total_sz[1])]
     
+    if grid:
+        clean_grid() #might be bad
+    grid = [[Cell(canv,x,y,color=(x+y)%2) for x in range(total_sz[0])] for y in range(total_sz[1])]
     generate_grid(mode) #Make graphical board
 
     canv["xscrollincrement"] = 2*onscreen[0]
@@ -259,7 +263,7 @@ def zoom(n):
     canv.update()
         
 def load_file():
-    global root, saved, onscreen, base_onscreen, total_sz, grid, canv
+    global root, saved, onscreen, base_onscreen, total_sz, grid, canv, imgs, selector, active_tile
     #Construct the logical grid
     filename = fd.askopenfilename(filetypes=[("HackUMBC RPG Engine File",".rpg")])
     if not filename:
@@ -275,12 +279,26 @@ def load_file():
         with f:
             _total_sz = list(map(int,f.readline().strip().split(",")))
             _onscreen = list(map(int,f.readline().strip().split(",")))
-            _grid     = [[Cell(canv,x,y) for x in range(_total_sz[0])] for y in range(_total_sz[1])]
+            _grid     = [[Cell(canv,x,y,color=(x+y)%2) for x in range(_total_sz[0])] for y in range(_total_sz[1])]
             for y in range(_total_sz[1]): #used up all my brainpower and forgot how to do this as a list comp
                 line_serial = f.readline().strip().split(",")
                 for x, elem in enumerate(line_serial):
                     _grid[x][y].deserialize(elem)
-    except Exception:
+            if f.readline().strip() != "?????":
+                raise Exception
+            _imgs = collections.OrderedDict()
+            line = f.readline()
+            while line:
+                iid, width, height, img_base64 = line.split(" ")
+                iid, width, height = map(int,(iid,width,height))
+                
+                img = Image.frombytes('RGBA', (width,height), base64.b64decode(img_base64))
+                img_64_32 = ImageTk.PhotoImage(img.resize((64,32), Image.ANTIALIAS))
+                img = ImageTk.PhotoImage(img)
+                _imgs[iid] = (img, img_64_32)
+                line = f.readline()
+    except Exception as e:
+        print(e)
         messagebox.showinfo('Error', 'The file is unsupported or corrupt.')
         return
         
@@ -289,13 +307,67 @@ def load_file():
     total_sz = _total_sz
     onscreen = _onscreen
     base_onscreen = copy.deepcopy(onscreen)
-    grid = _grid #SLOW
+    grid = _grid
+    
+    generate_grid(mode)
+    
+    #delete and move any existing tiles in selector
+    b_imgs = []
+    for key in imgs:
+        selector.delete(key)
+        b_imgs.append(imgs[key])
+        del imgs[key]
+    
+    file_to_tkmap = collections.OrderedDict()
+    for i, logical_id in enumerate(_imgs):
+        x = ((i % 3) * 66.66) + 32 + 10     #TODO: Modular scaling
+        y = (int(i / 3) * (32+10)) + 16 + 6
         
+        r_id = selector.create_image(x,y,image=_imgs[logical_id][1])
+        selector.tag_bind(r_id, "<Button-1>", set_active_tile_factory(r_id))
+        selector.tag_bind(r_id, "<Button-3>", lambda k: unset_active_tile())
+        selector.tag_bind(r_id, "<Shift-Button-3>", destroy_img_factory(r_id))
+        file_to_tkmap[logical_id] = r_id 
+        file_to_tkmap.move_to_end(logical_id,True)
+    selector.update()
+
+    #Rebind each cell to the appropriate id
+    for x in range(total_sz[0]):
+        for y in range(total_sz[1]):
+            grimd = grid[x][y].img_selector_match_id #uhhhhhhhhhhhhhhhhhhhhhhhhhhh
+            if grimd != -1:
+                old = grimd
+                grimd = file_to_tkmap[grimd]
+                grid[x][y].img_selector_match_id = grimd
+                fullsize = _imgs[old][0]
+                active_tile = [fullsize,grimd] #[imgs[sel_id][0],sel_id]
+                grid[x][y].fireImageChangeEvent(False)
+                
+    unset_active_tile()
+    
+    #Rebind the global mapping (which has logical ids as keys) to now have tk ids as keys. Because start at 0, potential for overlap,
+    #so just make a list (2N space) and swap pointers.
+    __imgs = collections.OrderedDict()
+    for logical_id in file_to_tkmap:
+        __imgs[file_to_tkmap[logical_id]] = _imgs[logical_id]
+    _imgs = __imgs
+    
+    #merge back anything that was in selector before load
+    for i, reserved_imgs in enumerate(b_imgs, start=len(_imgs)):
+        x = ((i % 3) * 66.66) + 32 + 10     #TODO: Modular scaling
+        y = (int(i / 3) * (32+10)) + 16 + 6 
+        real_id = selector.create_image(x,y,image=reserved_imgs[1])
+        selector.tag_bind(real_id, "<Button-1>", set_active_tile_factory(real_id))
+        selector.tag_bind(real_id, "<Button-3>", lambda k: unset_active_tile())
+        selector.tag_bind(real_id, "<Shift-Button-3>", destroy_img_factory(real_id))
+        _imgs[real_id] = reserved_imgs
+    
+    imgs = _imgs #pointer swap back, and done!
+    
     saved = True
     curfile = filename
     root.title("RPG: " + curfile)
     
-    generate_grid(mode)
     center_screen()
     canv.update()
     
@@ -334,6 +406,15 @@ def attempt_write(filename):
             for x in range(total_sz[0]):
                 for y in range(total_sz[1]):    
                     f.write(grid[x][y].seralize() + ("," if y != total_sz[1] - 1 else "\n"))
+            f.write("?????\n") #sep for img manifest
+            #this will make resync a pain but easiest way for now.
+            for iid in imgs:
+                im = ImageTk.getimage(imgs[iid][0])
+                f.write(str(iid) + " " + str(im.width) + " " + str(im.height) + " ")
+                raw = "".join(base64.encodebytes(im.tobytes()).decode('utf-8').split("\n"))
+                f.write(raw)
+                f.write("\n")
+                    
     except EnvironmentError:
         return False
     return True
@@ -341,7 +422,7 @@ def attempt_write(filename):
 def disp_cell_size_debug(pop):
     cwidth = canv.winfo_width()
     cheight = canv.winfo_height()
-    dx = ((cwidth/onscreen[0]) * math.sqrt(2)) if mode == "ISOMETRIC" else (cwidth/onscreen[0]) #WHAT
+    dx = ((cwidth/onscreen[0]) * math.sqrt(2)) if mode == "ISOMETRIC" else (cwidth/onscreen[0])
     dy = cheight/onscreen[1]
     if pop:
         messagebox.showinfo('Info', str(round(dx,5)) + "," + str(round(dy,5)))
@@ -357,8 +438,7 @@ def import_assets():
         try:
             pil_img = Image.open(filename)
             #save source quality: 0 = source, 1 = 64x32
-            raw_imgs.append( (ImageTk.PhotoImage(pil_img), ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS))) ) #TODO: LOGIC FOR THIS
-            #raw_imgs.append(ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS)))
+            raw_imgs.append( (ImageTk.PhotoImage(pil_img), ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS))) )
         except Exception as e: #TODO: except WHAT?
             print(e)
             errs.append(filename)
@@ -384,7 +464,7 @@ def import_assets():
 def set_active_tile_factory(sel_id):
     def set_active_tile(ignore):
         global active_tile, imgs
-        active_tile = imgs[sel_id][0]
+        active_tile = [imgs[sel_id][0],sel_id]
     return set_active_tile
     
         
@@ -394,7 +474,7 @@ def unset_active_tile():
         
 def destroy_img_factory(tk_id): 
     def destr_img(ignore): #this is actually necessary because python's GC is overzealous
-        global selector,imgs
+        global selector, imgs, grid
         imgs.pop(tk_id)
         selector.unbind_all(tk_id)
         selector.delete(tk_id)
@@ -405,6 +485,12 @@ def destroy_img_factory(tk_id):
             y = (int(i / 3) * (32+10)) + 16 + 6
             selector.coords(r_id, x, y)
         unset_active_tile()
+        
+        for x in range(total_sz[0]):
+            for y in range(total_sz[1]):
+                if grid[x][y].img_selector_match_id == tk_id: #delete any references still in the grid
+                    grid[x][y].fireImageChangeEvent(True)
+                
         selector.update()
     return destr_img
     
@@ -483,12 +569,14 @@ if __name__ == "__main__":
     root.bind_all("<Escape>", lambda k: unset_active_tile())
     
     mode="ISOMETRIC"
+    grid = None
     new() #make fresh board
     keydowns = [False for i in range(4)] #LEFT UP RIGHT DOWN
     
     saved = False #IO
     imgs = collections.OrderedDict()
     active_tile = None
+    
     #root.bind("<Motion>", active_tile_micro_on_cursor)
     
     game_loop()
