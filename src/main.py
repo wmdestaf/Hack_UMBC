@@ -12,9 +12,10 @@ import collections
 class Cell:
     def __init__(self,canv,x,y,color=0):
         self.canv = canv
+        self.img_src_quality = None
         self.img = None
         self.img_id = -1
-        self.x=x
+        self.x=x #gridx, gridy
         self.y=y
         self.color = color
         self.possible_colors = ['white','red','pink','blue']
@@ -32,19 +33,18 @@ class Cell:
         if not active_tile and not erase:
             for i in range(1,5):
                 canv.after(50 * i, lambda: self.change_pretty())
-            
-            #onscreen_cell = canv.coords(self.gid)
-            #print(onscreen_cell)
             return
         
         if erase: #deletion event
             canv.delete(self.img_id)
             self.img = None
+            self.img_src_quality = None
             self.img_id = -1
         else: #creation event
             if self.img: #remove any image which is already there
                 canv.delete(self.img_id)
             self.img = active_tile
+            self.img_src_quality = active_tile
             self.fireImageScaleEvent()
         canv.update()
             
@@ -57,8 +57,7 @@ class Cell:
         canv.delete(self.img_id)
           
         dx, dy = disp_cell_size_debug(False)
-        pil_img = ImageTk.getimage(self.img)
-        
+        pil_img = ImageTk.getimage(self.img_src_quality)
         self.img = ImageTk.PhotoImage(pil_img.resize((int(dx),int(dy)), Image.ANTIALIAS))
         
         #this can be one function
@@ -68,7 +67,7 @@ class Cell:
         draw_y = onscreen_cell[5] #highest point of the trapezoid
         
         self.img_id = canv.create_image(draw_x,draw_y,image=self.img)
-        canv.itemconfig(self.img_id, state=tk.DISABLED)
+        canv.itemconfig(self.img_id, state=tk.DISABLED) #ignore clicks on the *square* image, to pass through to the polygonal tile area
         
         #maintain isometric depth
         #find the nearest z-ordered item, and put us below it on the display list.
@@ -357,8 +356,9 @@ def import_assets():
     for filename in filenames:
         try:
             pil_img = Image.open(filename)
-            #raw_imgs.append( (ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS)), ImageTk.PhotoImage(pil_img)) ) #TODO: LOGIC FOR THIS
-            raw_imgs.append(ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS)))
+            #save source quality: 0 = source, 1 = 64x32
+            raw_imgs.append( (ImageTk.PhotoImage(pil_img), ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS))) ) #TODO: LOGIC FOR THIS
+            #raw_imgs.append(ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS)))
         except Exception as e: #TODO: except WHAT?
             print(e)
             errs.append(filename)
@@ -373,18 +373,18 @@ def import_assets():
         x = ((i % 3) * 66.66) + 32 + 10     #TODO: Modular scaling
         y = (int(i / 3) * (32+10)) + 16 + 6
         
-        r_id = selector.create_image(x,y,image=img)
+        r_id = selector.create_image(x,y,image=img[1])
         selector.tag_bind(r_id, "<Button-1>", set_active_tile_factory(r_id))
         selector.tag_bind(r_id, "<Button-3>", lambda k: unset_active_tile())
         selector.tag_bind(r_id, "<Shift-Button-3>", destroy_img_factory(r_id))
-        imgs[r_id] = img #store
+        imgs[r_id] = img #store tuple
         imgs.move_to_end(r_id,True)
     selector.update()
         
 def set_active_tile_factory(sel_id):
     def set_active_tile(ignore):
         global active_tile, imgs
-        active_tile = imgs[sel_id]
+        active_tile = imgs[sel_id][0]
     return set_active_tile
     
         
