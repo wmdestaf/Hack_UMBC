@@ -59,7 +59,9 @@ def game_loop0():
             else: #down
                 dx += 1
                 dy += 1
+
         #TODO: update player 'position' off dx, dy
+        #...
     else: #move with arrowkeys
         dx = keydowns[2] - keydowns[0]
         dy = keydowns[3] - keydowns[1]
@@ -84,9 +86,10 @@ if __name__ == "__main__":
     root.bind("<KeyPress>", keydown0)
     root.bind("<KeyRelease>", keyup0)
     
-    canv = main.canv = tk.Canvas(main.root, bg='green', height=500, width=500)
+    canv = main.canv = tk.Canvas(root, bg='black', height=500, width=500)
     canv.pack()
     canv.update()
+    
     
     menubar = Menu(root)
     menubar.add_command(label="Open", command=load_file,accelerator="Ctrl-O")

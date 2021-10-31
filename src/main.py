@@ -6,6 +6,7 @@ from tkinter import messagebox
 from os.path import exists
 import copy
 import math
+import collections
     
 class Cell:
     def __init__(self, color,canv,x,y):
@@ -94,7 +95,7 @@ def generate_grid(which_mode):
         mode = "ISOMETRIC"
     
 def game_loop():
-    global canv, grid, keydowns
+    global canv, grid, keydowns, imgs
     
     #calculate panning of the camera
     dx = keydowns[2] - keydowns[0]
@@ -104,6 +105,7 @@ def game_loop():
         canv.xview_scroll(dx, UNITS)
     if dy:
         canv.yview_scroll(dy, UNITS)
+
     canv.update()
     canv.after(25, game_loop)
     
@@ -125,7 +127,6 @@ def keydown(e):
     elif k == 99: #center
         center_screen()
         canv.update()
-        
 
 def donothing():
     pass
@@ -201,7 +202,7 @@ def load_file():
     #Construct the logical grid
     filename = fd.askopenfilename(filetypes=[("HackUMBC RPG Engine File",".rpg")])
     if not filename:
-        messagebox.showinfo('Error', 'Please provide an appropriate file.')
+        #messagebox.showinfo('Error', 'Please provide an appropriate file.')
         return
     try:
         f = open(filename,"r")
@@ -283,9 +284,55 @@ def disp_cell_size_debug():
     dy = cheight/onscreen[1]
     messagebox.showinfo('Info', str(round(dx,5)) + "," + str(round(dy,5)))
     
+def import_assets():
+    global selector, imgs
+
+    filenames = fd.askopenfilenames(filetypes=[("PNG",".png")])
+    errs = []
+    raw_imgs = []
+    for filename in filenames:
+        try:
+            raw_imgs.append(tk.PhotoImage(file=filename))
+        except: #TODO: except WHAT?
+            errs.append(filename)
+            
+    if errs: #at least one image failed
+        errstr = "\n".join(["Could not open file: " + f for f in errs])
+        messagebox.showinfo('Error', errstr)
+        
+    off = len(imgs)
+    #insert valid images and bind selectors:
+    for i, img in enumerate(raw_imgs, start=off):
+        x = ((i % 3) * 66.66) + 32 + 10 
+        y = (int(i / 3) * (32+10)) + 16 + 6
+        
+        r_id = selector.create_image(x,y,image=img)
+        selector.tag_bind(r_id, "<Button-1>", lambda k: donothing)
+        selector.tag_bind(r_id, "<Button-3>", lambda k: donothing)
+        selector.tag_bind(r_id, "<Shift-Button-3>", destroy_img_factory(r_id))
+        imgs[r_id] = img #store
+    selector.update()
+        
+def destroy_img_factory(tk_id): 
+    def destr_img(ignore): #this is actually necessary because python's GC is overzealous
+        global selector,imgs
+        imgs.pop(tk_id)
+        selector.unbind_all(tk_id)
+        selector.delete(tk_id)
+        
+        #At this point, the images may be unordered in the grid. Move them back into place.
+        for i, r_id in enumerate(imgs):
+            x = ((i % 3) * 66.66) + 32 + 10 
+            y = (int(i / 3) * (32+10)) + 16 + 6
+            selector.coords(r_id, x, y)
+        selector.update()
+    return destr_img
+    
 if __name__ == "__main__":
-    s_width,s_height = 500,500
+    s_width,s_height = 700,500
     root = tk.Tk()
+    ttk.Style(root).theme_use('alt')
+    
     root.title("RPG")
     root.resizable(False,False)
     root.geometry(str(s_width) + 'x' + str(s_height))
@@ -293,9 +340,19 @@ if __name__ == "__main__":
     root.bind("<KeyPress>", keydown)
     root.bind("<KeyRelease>", keyup)
     
+    #main canvas
     canv = tk.Canvas(root, bg='green', height=500, width=500)
-    canv.pack()
+    canv.grid(row=0,column=2)
     canv.update()
+    
+    #scrollbar for tiles
+    selector_bar = ttk.Scrollbar(root, orient=VERTICAL)
+    selector_bar.grid(row=0,column=0,sticky=(N,S))
+    
+    #tile 'selector'
+    selector = tk.Canvas(root, bg='white',yscrollcommand=selector_bar.set, height=500, width=200, borderwidth=5, relief='sunken')
+    selector.pack_propagate(0)
+    selector.grid(row=0,column=1)
     
     menubar = Menu(root)
     filemenu = Menu(menubar, tearoff=0)
@@ -307,6 +364,9 @@ if __name__ == "__main__":
     root.bind_all("<Control-s>", lambda k: save_file())
     filemenu.add_command(label="Save As...", command=save_f_as,accelerator="Ctrl-Alt-S")
     root.bind_all("<Control-Alt-s>", lambda k: save_f_as())
+    filemenu.add_separator()
+    filemenu.add_command(label="Import", command=import_assets, accelerator="Ctrl-I")
+    root.bind_all("<Control-i>", lambda k: import_assets())
     filemenu.add_separator()
     filemenu.add_command(label="Exit", command=root.quit)
     menubar.add_cascade(label="File", menu=filemenu)
@@ -338,6 +398,7 @@ if __name__ == "__main__":
     keydowns = [False for i in range(4)] #LEFT UP RIGHT DOWN
     
     saved = False #IO
+    imgs = collections.OrderedDict()
     
     game_loop()
     root.mainloop()
