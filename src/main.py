@@ -33,8 +33,8 @@ class Cell:
             for i in range(1,5):
                 canv.after(50 * i, lambda: self.change_pretty())
             
-            onscreen_cell = canv.coords(self.gid)
-            print(onscreen_cell)
+            #onscreen_cell = canv.coords(self.gid)
+            #print(onscreen_cell)
             return
         
         if erase: #deletion event
@@ -46,17 +46,6 @@ class Cell:
                 canv.delete(self.img_id)
             self.img = active_tile
             self.fireImageScaleEvent()
-                
-            #TODO: does not account for images at x:y != 2:1
-            onscreen_cell = canv.coords(self.gid)
-            
-            print(onscreen_cell)
-            draw_x = onscreen_cell[2] #leftest point of the trapezoid
-            draw_y = onscreen_cell[5] #highest point of the trapezoid
-            
-            self.img_id = canv.create_image(draw_x,draw_y,image=self.img)
-            canv.itemconfig(self.img_id, state=tk.DISABLED)
-            
         canv.update()
             
     def fireImageScaleEvent(self):
@@ -64,10 +53,29 @@ class Cell:
         
         if not self.img:
             return
-            
+          
+        canv.delete(self.img_id)
+          
         dx, dy = disp_cell_size_debug(False)
         pil_img = ImageTk.getimage(self.img)
+        
         self.img = ImageTk.PhotoImage(pil_img.resize((int(dx),int(dy)), Image.ANTIALIAS))
+        
+        #this can be one function
+        #TODO: does not account for images at x:y != 2:1
+        onscreen_cell = canv.coords(self.gid)
+        draw_x = onscreen_cell[2] #leftest point of the trapezoid
+        draw_y = onscreen_cell[5] #highest point of the trapezoid
+        
+        self.img_id = canv.create_image(draw_x,draw_y,image=self.img)
+        canv.itemconfig(self.img_id, state=tk.DISABLED)
+        
+        #maintain isometric depth
+        #find the nearest z-ordered item, and put us below it on the display list.
+        for x in range(total_sz[0]):
+            for y in range(total_sz[1]):
+                if grid[x][y].img and (x > self.x or (x == self.x and y < self.y)):
+                    canv.tag_lower(self.img_id, grid[x][y].img_id)
     
     def chg_gcol(self,off):
         self.color += off
@@ -87,7 +95,7 @@ class Cell:
     
     def __repr__(self):
         return ",".join(map(str,self.__dict__.keys())) + "\n" + ",".join(map(str,self.__dict__.values()))
-   
+
 def on_cell_click_factory(x,y,r_id,erase):
     def internal(ignore):
         global grid, canv, root, saved, active_tile
@@ -110,7 +118,7 @@ def clean_grid():
 def generate_grid(which_mode):
     global canv, grid, total_sz, onscreen, mode
     
-    clean_grid() #Clear any bindings that previously existed
+    #clean_grid() maybe not.
     cwidth = canv.winfo_width()
     cheight = canv.winfo_height()
 
@@ -137,15 +145,19 @@ def generate_grid(which_mode):
                 y3 = y1
                 x4 = x2
                 y4 = y1 + 0.5*dy
-                r_id = canv.create_polygon([x1,y1,x2,y2,x3,y3,x4,y4], fill = grid[x][y].get_gcol(),outline='black') 
-                canv.tag_bind(r_id, "<Button-1>", on_cell_click_factory(x,y,r_id, False))
-                canv.tag_bind(r_id, "<Button-3>", on_cell_click_factory(x,y,r_id, True))
-                grid[x][y].gid = r_id
+                r_id = grid[x][y].gid
+                if not r_id: #grid for the first time
+                    r_id = canv.create_polygon([x1,y1,x2,y2,x3,y3,x4,y4], fill = grid[x][y].get_gcol(),outline='black') 
+                    canv.tag_bind(r_id, "<Button-1>", on_cell_click_factory(x,y,r_id, False))
+                    canv.tag_bind(r_id, "<Button-3>", on_cell_click_factory(x,y,r_id, True))
+                    grid[x][y].gid = r_id
+                else:
+                    canv.coords(r_id,[x1,y1,x2,y2,x3,y3,x4,y4])
         mode = "ISOMETRIC"
-    
-    for x in range(total_sz[0]):
-        for y in range(total_sz[1]):  
-            grid[x][y].fireImageScaleEvent()
+
+        for x in range(total_sz[0]):
+            for y in range(total_sz[1]):  
+                grid[x][y].fireImageScaleEvent()
     
 def game_loop():
     global canv, grid, keydowns, imgs, active_tile
@@ -244,7 +256,7 @@ def zoom(n):
         return #Zoom too close, divide by zero. Zoom too far, centering becomes annoying to calculate for.
     onscreen[0] += n
     onscreen[1] += n
-    generate_grid(mode) #Costly but necessary to rebind click->action areas within TK. 
+    generate_grid(mode)
     canv.update()
         
 def load_file():
@@ -273,7 +285,7 @@ def load_file():
         messagebox.showinfo('Error', 'The file is unsupported or corrupt.')
         return
         
-    clean_grid()
+    clean_grid() #VERY IMPORTANT
         
     total_sz = _total_sz
     onscreen = _onscreen
@@ -344,7 +356,9 @@ def import_assets():
     raw_imgs = []
     for filename in filenames:
         try:
-            raw_imgs.append( ImageTk.PhotoImage ( Image.open(filename) ) )
+            pil_img = Image.open(filename)
+            #raw_imgs.append( (ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS)), ImageTk.PhotoImage(pil_img)) ) #TODO: LOGIC FOR THIS
+            raw_imgs.append(ImageTk.PhotoImage(pil_img.resize((64,32), Image.ANTIALIAS)))
         except Exception as e: #TODO: except WHAT?
             print(e)
             errs.append(filename)
@@ -360,15 +374,19 @@ def import_assets():
         y = (int(i / 3) * (32+10)) + 16 + 6
         
         r_id = selector.create_image(x,y,image=img)
-        selector.tag_bind(r_id, "<Button-1>", lambda k: set_active_tile(r_id))
+        selector.tag_bind(r_id, "<Button-1>", set_active_tile_factory(r_id))
         selector.tag_bind(r_id, "<Button-3>", lambda k: unset_active_tile())
         selector.tag_bind(r_id, "<Shift-Button-3>", destroy_img_factory(r_id))
         imgs[r_id] = img #store
+        imgs.move_to_end(r_id,True)
     selector.update()
         
-def set_active_tile(sel_id):
-    global active_tile, imgs
-    active_tile = imgs[sel_id]
+def set_active_tile_factory(sel_id):
+    def set_active_tile(ignore):
+        global active_tile, imgs
+        active_tile = imgs[sel_id]
+    return set_active_tile
+    
         
 def unset_active_tile():
     global active_tile
@@ -446,7 +464,7 @@ if __name__ == "__main__":
     root.bind_all("<Control-minus>", lambda k: zoom(1))
     viewmenu.add_command(label="Reset Zoom", command=lambda: zoom(0),  accelerator="Ctrl+0")
     root.bind_all("<Control-0>",     lambda k: zoom(0))
-    viewmenu.add_separator()
+    #viewmenu.add_separator()
     #swapping requires messing with UI for tiles, not going to bother with for this
     #viewmenu.add_command(label="Orthogonal", command=lambda: generate_grid("ORTHOGONAL"), accelerator="Ctrl+Shift+O")
     #root.bind_all("<Control-Shift-O>", lambda k: generate_grid("ORTHOGONAL"))
